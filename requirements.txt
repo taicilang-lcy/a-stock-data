@@ -1,0 +1,11 @@
+# a-stock-data 运行依赖
+# 安装：pip install -r requirements.txt
+#
+# 版本说明：
+# - mootdx 必须锁 <0.11：0.11.x 重构了 reader 子模块，与本项目调用方式不兼容（#26）。
+#   pip 默认装最新版会踩坑，故在此显式约束上界。
+# - 其余为宽松下界，保证已验证可用的最低版本；无特殊原因不建议锁死上界。
+mootdx>=0.10.5,<0.11
+requests>=2.25
+pandas>=1.3
+stockstats>=0.4
