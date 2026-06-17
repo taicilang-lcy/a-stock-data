@@ -1,5 +1,44 @@
 # Changelog
 
+## v3.2.2-lcy.1 — 2026-06-17（fork: taicilang-lcy/a-stock-data）
+
+> 基于 upstream v3.2.2，工程化 / 安全 / 健壮性修复。fork 独立版本线（`-lcy.N` 后缀），与 upstream 解耦，便于后续按需 cherry-pick upstream 的接口失效修复。
+
+### 修复
+- **[P0] `download_pdf` 路径穿越（对应 upstream #3）**：`org` / `date` 来自外部研报数据、原代码未清洗，拼进文件名可被构造 `../../` 逃逸 `target_dir`（如 `orgSName="../../../../etc/passwd"`）→ 统一 `re.sub(r'[\\/:*?"<>|]', "_", ...)` 过滤非法路径字符 + 截断，`date` 额外校验 `^\d{4}-\d{2}-\d{2}$`。已用 `resolve()` 包含校验验证 4 类攻击 case（经典穿越 / 绝对路径 / Windows 式 / 正常机构）落点均在 `target_dir` 内。
+- **[P0] mootdx 版本锁（对应 upstream #26）**：新增仓库根 `requirements.txt`，锁 `mootdx>=0.10.5,<0.11`（0.11.x 重构 reader 子模块、与本项目调用方式不兼容）；安装命令改为 `pip install -r requirements.txt`；SKILL.md 依赖表 + frontmatter description 同步标注上界。
+- **[P1] `em_get` 连接级自动重试**：东财 push2 / datacenter 偶发 `502/503/504` 或连接重置（#18 / #25 反映的住宅 IP 间歇风控），原 `em_get` 只做串行节流、不重试 → 在节流之外叠加 `urllib3 Retry(total=3, connect=3, read=2, backoff_factor=0.5, status_forcelist=(502,503,504))`，**不改变限流语义**、只对连接级/瞬态 HTTP 错误重试；urllib3 不可用时静默降级为不重试。
+- **[P1] 腾讯行情字段停牌容错**：`float(vals[N]) if vals[N] else 0` 遇停牌占位符 `"-"` 时 `"-"` 为真值 → `float("-")` 抛 `ValueError` 崩溃 → 抽 `_to_float()` 安全转浮点（`TypeError/ValueError` 返回 0），18 个字段统一替换。
+- **[P1] `full_valuation` EPS 解析按列名**：旧代码 `row.iloc[2]` / `iloc[1]` 靠固定列位置，同花顺 `worth.html` 表格列序一旦变化即静默取错列（可能取到「最小值」而非「均值」=一致预期EPS）→ 改为按列名定位「均值」列（一致预期 EPS）与含「机构」的列（预测机构数），robust 到列序增删；取不到列时优雅降级为 `None`。
+
+### 增强
+- **[P1] `eastmoney_reports` 暴露 `q_type` 参数**：默认 `q_type=0`（个股，向后兼容）；`q_type=1` 按「行业」拉整批行业研报（`code` 留空、`industry` 过滤，从源头不碰个股）——这正是作者视频提到但 skill 未封装的能力。同时暴露 `begin/end/industry` 参数便于按日期/行业过滤。实测 `q_type=1` + 近 3 个月可命中人形机器人产业链研报。
+
+### 文档
+- **frontmatter `description` 加前置约束**（无意外原则）：标注 `mootdx<0.11` + 国内 TCP 7709（海外不可用）、其余 HTTP 接口海外可用、iwencai 语义搜索需自配 `IWENCAI_API_KEY`。
+- **依赖矩阵**：版本列补全上界/下界（`mootdx>=0.10.5,<0.11` / `requests>=2.25` / `pandas>=1.3` / `stockstats>=0.4`）+ pandas 3.0 `StringIO` 说明 + 网络环境前置说明。
+- 新增 `requirements.txt`。
+
+### 测试
+- SKILL.md 全部 38 个 python 代码块通过 `ast` 语法校验（无回归）。
+- `download_pdf` 路径穿越：4 类攻击 case 的 `resolve()` 落点均确认在 `target_dir` 内。
+- `eastmoney_reports(q_type=1)` 实测返回行业研报；`eastmoney_reports("688017")` 默认 `q_type=0` 个股研报向后兼容正常。
+
+### 说明（未做 / 有意保留）
+- **iwencai 请求头**：核对 V3.2.2 master 源码，`_claw_headers()` 已正确包含全部 6 个 X-Claw 头（`X-Claw-Call-Type` / `X-Claw-Skill-Id` / `X-Claw-Skill-Version` / `X-Claw-Plugin-Id` / `X-Claw-Plugin-Version` / `X-Claw-Trace-Id`），`iwencai_search` 函数**无 bug、未改动**。（早前调研曾因 grep 截断窗口误判「缺两头」，已核对源码更正。）
+- **异常处理（有意保留现状）**：各端点 `except Exception: print("[WARN]...") + 返回空/默认值` 的防御式设计**保留不改**——对 agent 执行的 skill，瞬态网络错误不应 `raise` 崩溃整个分析流程；返回空列表已是明确的「无数据」信号，WARN 也会打到 stdout 供 agent 感知。强行转 raise 会降可靠性。
+- **渐进式披露拆分（评审 P0-4）未做**：82KB SKILL.md → `scripts/` + `references/` 的拆分是多日架构重构，upstream 作者已明确拒绝（#1 / #21 / #22）；作为 fork 后续独立 phase 评估，不在本次提交内。
+
+### 复审修复（子 agent critical review 后补）
+- **[blocker] requirements.txt 补 `lxml>=4.6`**：`pd.read_html`（§2.2 `ths_eps_forecast`）的 HTML 解析后端，pandas 核心包不含，干净安装必需；否则首次调用即 `ImportError`。
+- **requirements.txt 补 `urllib3>=1.26`**：`em_get` 重试用的 `Retry(allowed_methods=...)` 字段 1.26 才引入，锁下界保证重试对所有环境生效（旧版静默降级为不重试，不崩但 P1 修复失效）。
+- **`full_valuation` 残留裸 `float(vals[N])`**：行 price/mcap/pe_ttm/pb 4 处仍是 `float(vals[3])` 等旧模式（与腾讯停牌 `'-'` 同 bug），停牌股调用会崩 → 抽局部 `_num()` 安全转换。
+- **`eastmoney_reports` 加 code guard**：`q_type==0 and not code` 时 `raise ValueError`，防无参调用被东财当成拉全市场（数百页 + 限流极慢）。
+- **`download_pdf` 正则补控制字符**：`[\x00-\x1f\\/:*?"<>|]`，纵深防御 null 字节/换行/RTL override 等（不致穿越，但避免诡异文件名 / `embedded null byte` 写入错误）。
+- **description 精简**至 356 字符（原 408），去掉与 Prerequisites/依赖矩阵重复的前置段冗余。
+
+---
+
 ## v3.2.2 — 2026-06-03
 
 ### 修复（失效接口替换 + 隐藏 Bug）

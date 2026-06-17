@@ -1,8 +1,8 @@
 ---
 name: a-stock-data
-description: A股全栈数据工具包 — 覆盖行情(mootdx+腾讯+百度K线)、研报(东财+同花顺+iwencai)、信号(同花顺热点+北向+龙虎榜+解禁+行业)、资金面(融资融券+大宗交易+股东户数+分红+资金流分钟级+资金流120日)、新闻(东财个股+全球资讯)、基础数据(mootdx财务/F10+东财+新浪三表)、公告(巨潮)七层数据源，内嵌全部调用代码，自包含零依赖外部文件。优先用通达信(mootdx)/腾讯(不封IP)，东财接口已内置限流防封。适用于个股估值、研报检索、题材归因、龙虎榜跟踪、解禁预警、行业轮动、融资融券跟踪、筹码分析、产业链调研、批量筛选等场景。
+description: A股全栈数据工具包 — 覆盖行情(mootdx+腾讯+百度K线)、研报(东财+同花顺+iwencai)、信号(同花顺热点+北向+龙虎榜+解禁+行业)、资金面(融资融券+大宗交易+股东户数+分红+资金流分钟级+资金流120日)、新闻(东财个股+全球资讯)、基础数据(mootdx财务/F10+东财+新浪三表)、公告(巨潮)七层数据源，内嵌全部调用代码，自包含零依赖外部文件。优先用通达信(mootdx)/腾讯(不封IP)，东财接口已内置限流防封。适用于个股估值、研报检索、题材归因、龙虎榜跟踪、解禁预警、行业轮动、融资融券跟踪、筹码分析、产业链调研、批量筛选等场景。前置：mootdx<0.11（国内TCP，海外不可用）；iwencai语义搜索需key，其余免费无key——详见 requirements.txt。
 origin: custom
-version: 3.2.2
+version: 3.2.2-lcy.1
 ---
 
 > 📦 项目主页：https://github.com/simonlin1212/a-stock-data — 更新、反馈、支持作者
@@ -154,15 +154,20 @@ version: 3.2.2
 ## Prerequisites
 
 ```bash
-pip install mootdx requests pandas stockstats
+# 推荐：用仓库根目录的 requirements.txt（已锁版本，避免踩 #26 mootdx 0.11.x 坑）
+pip install -r requirements.txt
+# 或最小化安装（注意 mootdx 必须 <0.11）
+pip install "mootdx>=0.10.5,<0.11" requests pandas stockstats
 ```
 
 | 依赖 | 版本要求 | 用途 |
 |------|---------|------|
-| mootdx | >= 0.10 | TCP行情+财务+F10（唯一非HTTP依赖） |
-| requests | any | 所有HTTP API直连 |
-| pandas | any | 数据处理+HTML表格解析 |
-| stockstats | any | 技术指标计算（RSI/MACD/BOLL等） |
+| mootdx | `>=0.10.5,<0.11` ⚠️ | TCP行情+财务+F10（唯一非HTTP依赖）；**必须锁上界**——0.11.x 重构 reader 子模块已不兼容（#26） |
+| requests | `>=2.25` | 所有HTTP API直连 |
+| pandas | `>=1.3` | 数据处理+HTML表格解析（pandas 3.0 需 `StringIO` 包裹 `read_html`，§2.2 已处理） |
+| stockstats | `>=0.4` | 技术指标计算（RSI/MACD/BOLL等） |
+
+> **网络/环境前置：** mootdx 走国内通达信 TCP 7709，**海外 IP 不可用**（行情层 K线/盘口需国内网络）；其余 HTTP 接口（腾讯/东财/同花顺/新浪/巨潮/iwencai）海外均可。iwencai 语义搜索需自配 `IWENCAI_API_KEY`，其余全部免费无 key。
 
 > **V3.0 架构：** 除 mootdx（TCP 二进制协议）外，所有数据源均为直连 HTTP API，零第三方数据封装依赖。每个端点的底层 URL/参数完全暴露，方便调试和定制。
 
@@ -225,6 +230,22 @@ EM_SESSION = requests.Session()
 EM_SESSION.headers.update({"User-Agent": UA})
 EM_MIN_INTERVAL = 1.0          # 两次东财请求最小间隔(秒)；批量筛选建议调大到 1.5~2
 _em_last_call = [0.0]          # 模块级上次请求时间戳
+
+# 连接级自动重试：东财 push2/datacenter 偶发 502/503/504 或连接重置（#18/#25 反映的
+# 住宅 IP 间歇风控），在 em_get 的串行节流之外叠加 urllib3 自动重试——不改变限流语义，
+# 只对连接级/瞬态 HTTP 错误重试。urllib3 不可用时静默降级为不重试。
+try:
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    _EM_RETRY = Retry(total=3, connect=3, read=2, backoff_factor=0.5,
+                      status_forcelist=(502, 503, 504),
+                      allowed_methods=frozenset(["GET", "POST"]),
+                      raise_on_status=False)
+    _EM_ADAPTER = HTTPAdapter(max_retries=_EM_RETRY)
+    EM_SESSION.mount("https://", _EM_ADAPTER)
+    EM_SESSION.mount("http://", _EM_ADAPTER)
+except Exception:
+    pass
 
 def em_get(url: str, params: dict | None = None, headers: dict | None = None,
            timeout: int = 15, **kwargs):
@@ -318,6 +339,13 @@ def tencent_quote(codes: list[str]) -> dict[str, dict]:
     resp = urllib.request.urlopen(req, timeout=10)
     data = resp.read().decode("gbk")
 
+    def _to_float(v):
+        """安全转浮点：停牌/异常值（'-'、空串等）返回 0，避免 float('-') 崩溃"""
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return 0
+
     result = {}
     for line in data.strip().split(";"):
         if not line.strip() or "=" not in line or '"' not in line:
@@ -329,24 +357,24 @@ def tencent_quote(codes: list[str]) -> dict[str, dict]:
         code = key[2:]
         result[code] = {
             "name":         vals[1],
-            "price":        float(vals[3]) if vals[3] else 0,
-            "last_close":   float(vals[4]) if vals[4] else 0,
-            "open":         float(vals[5]) if vals[5] else 0,
-            "change_amt":   float(vals[31]) if vals[31] else 0,
-            "change_pct":   float(vals[32]) if vals[32] else 0,
-            "high":         float(vals[33]) if vals[33] else 0,
-            "low":          float(vals[34]) if vals[34] else 0,
-            "amount_wan":   float(vals[37]) if vals[37] else 0,
-            "turnover_pct": float(vals[38]) if vals[38] else 0,
-            "pe_ttm":       float(vals[39]) if vals[39] else 0,
-            "amplitude_pct":float(vals[43]) if vals[43] else 0,
-            "mcap_yi":      float(vals[44]) if vals[44] else 0,
-            "float_mcap_yi":float(vals[45]) if vals[45] else 0,
-            "pb":           float(vals[46]) if vals[46] else 0,
-            "limit_up":     float(vals[47]) if vals[47] else 0,
-            "limit_down":   float(vals[48]) if vals[48] else 0,
-            "vol_ratio":    float(vals[49]) if vals[49] else 0,
-            "pe_static":    float(vals[52]) if vals[52] else 0,
+            "price":        _to_float(vals[3]),
+            "last_close":   _to_float(vals[4]),
+            "open":         _to_float(vals[5]),
+            "change_amt":   _to_float(vals[31]),
+            "change_pct":   _to_float(vals[32]),
+            "high":         _to_float(vals[33]),
+            "low":          _to_float(vals[34]),
+            "amount_wan":   _to_float(vals[37]),
+            "turnover_pct": _to_float(vals[38]),
+            "pe_ttm":       _to_float(vals[39]),
+            "amplitude_pct":_to_float(vals[43]),
+            "mcap_yi":      _to_float(vals[44]),
+            "float_mcap_yi":_to_float(vals[45]),
+            "pb":           _to_float(vals[46]),
+            "limit_up":     _to_float(vals[47]),
+            "limit_down":   _to_float(vals[48]),
+            "vol_ratio":    _to_float(vals[49]),
+            "pe_static":    _to_float(vals[52]),
         }
     return result
 
@@ -445,15 +473,25 @@ REPORT_API = "https://reportapi.eastmoney.com/report/list"
 PDF_TPL = "https://pdf.dfcfw.com/pdf/H3_{info_code}_1.pdf"
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
 
-def eastmoney_reports(code: str, max_pages: int = 5) -> list[dict]:
-    """拉取指定股票的研报列表"""
+def eastmoney_reports(code: str = "", max_pages: int = 5, q_type: int = 0,
+                      industry: str = "*", begin: str = "2000-01-01",
+                      end: str = "2030-01-01") -> list[dict]:
+    """拉取研报列表（东财 reportapi，免 key，已内置限流）。
+    q_type=0（默认）: 按个股拉，需传 code（如 "688017"）。
+    q_type=1:        按「行业」拉整批行业研报——code 留空、用 industry 过滤
+                     （industry="*"=全行业；或传东财行业名如 "通用设备"），
+                     从源头不碰个股。begin/end 控制日期范围（YYYY-MM-DD）。
+    返回 record 列表，字段含 publishDate/orgSName/title/infoCode/emRatingName 等。"""
+    # q_type=0 必须传 code；否则东财会返回全市场研报（数百页，配合限流极慢且无意义）。
+    if q_type == 0 and not code:
+        raise ValueError("q_type=0（个股研报）必须传 code；按行业拉请用 q_type=1。")
     all_records = []
     for page in range(1, max_pages + 1):
         params = {
-            "industryCode": "*", "pageSize": "100", "industry": "*",
+            "industryCode": "*", "pageSize": "100", "industry": industry,
             "rating": "*", "ratingChange": "*",
-            "beginTime": "2000-01-01", "endTime": "2030-01-01",
-            "pageNo": str(page), "fields": "", "qType": "0",
+            "beginTime": begin, "endTime": end,
+            "pageNo": str(page), "fields": "", "qType": str(q_type),
             "orgCode": "", "code": code, "rcode": "",
             "p": str(page), "pageNum": str(page), "pageNumber": str(page),
         }
@@ -473,9 +511,13 @@ def download_pdf(record: dict, target_dir: str = "./reports") -> str | None:
     info_code = record.get("infoCode", "")
     if not info_code:
         return None
-    date = (record.get("publishDate") or "")[:10]
-    org = record.get("orgSName") or "未知"
-    title = re.sub(r'[\\/:*?"<>|]', "_", record.get("title", ""))[:80]
+    # 安全校验：org/date 来自外部数据，未清洗会拼进文件名导致路径穿越（#3）。
+    # 过滤非法路径字符 + 控制字符/null字节（\x00-\x1f）+ 截断；date 额外校验 YYYY-MM-DD。
+    _ILLEGAL = r'[\x00-\x1f\\/:*?"<>|]'
+    date_raw = (record.get("publishDate") or "")[:10]
+    date = date_raw if re.match(r'^\d{4}-\d{2}-\d{2}$', date_raw) else "unknown_date"
+    org = re.sub(_ILLEGAL, "_", (record.get("orgSName") or "未知"))[:40]
+    title = re.sub(_ILLEGAL, "_", record.get("title", ""))[:80]
     fname = f"{date}_{org}_{title}.pdf"
     target = Path(target_dir) / fname
     if target.exists():
@@ -1870,6 +1912,13 @@ import pandas as pd
 
 def full_valuation(code: str) -> dict:
     """单票完整估值分析"""
+    def _num(v, default=0.0):
+        """安全转浮点：停牌占位 '-' 等异常返回 default，避免 float('-') 崩溃"""
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
     # 1. 腾讯实时行情
     prefix = "sh" if code.startswith(("6","9")) else ("bj" if code.startswith("8") else "sz")
     url = f"https://qt.gtimg.cn/q={prefix}{code}"
@@ -1878,25 +1927,33 @@ def full_valuation(code: str) -> dict:
     resp = urllib.request.urlopen(req, timeout=10)
     data = resp.read().decode("gbk")
     vals = data.split('"')[1].split("~")
-    price = float(vals[3])
-    mcap = float(vals[44])
-    pe_ttm = float(vals[39]) if vals[39] else 0
-    pb = float(vals[46]) if vals[46] else 0
+    price = _num(vals[3])
+    mcap = _num(vals[44])
+    pe_ttm = _num(vals[39])
+    pb = _num(vals[46])
 
     # 2. 机构一致预期（直连同花顺）
     df = ths_eps_forecast(code)
     eps_cur = eps_next = None
     analyst_count = 0
-    if not df.empty and len(df.columns) >= 3:
-        # 解析表格（列结构因页面可能变化，取前两行数据行）
+    if not df.empty:
+        # 按列名定位（同花顺 worth.html 表格列序可能变化，不能依赖固定位置 iloc）：
+        # 「均值」列 = 机构一致预期 EPS；含「机构」的列 = 预测机构数。
+        cols = list(df.columns)
+        eps_col = next((c for c in cols if "均值" in str(c)), None)
+        analyst_col = next((c for c in cols if "机构" in str(c)), None)
         try:
-            for i, row in df.iterrows():
-                if i == 0:
-                    eps_cur = float(row.iloc[2]) if pd.notna(row.iloc[2]) else None
-                    analyst_count = int(row.iloc[1]) if pd.notna(row.iloc[1]) else 0
-                elif i == 1:
-                    eps_next = float(row.iloc[2]) if pd.notna(row.iloc[2]) else None
-        except (ValueError, IndexError):
+            data_rows = [row for _, row in df.iterrows()]
+            r0 = data_rows[0] if len(data_rows) > 0 else None
+            r1 = data_rows[1] if len(data_rows) > 1 else None
+            if eps_col is not None:
+                if r0 is not None and pd.notna(r0[eps_col]):
+                    eps_cur = float(r0[eps_col])
+                if r1 is not None and pd.notna(r1[eps_col]):
+                    eps_next = float(r1[eps_col])
+            if analyst_col is not None and r0 is not None and pd.notna(r0[analyst_col]):
+                analyst_count = int(r0[analyst_col])
+        except (ValueError, KeyError, TypeError):
             pass
 
     # 3. 估值指标
