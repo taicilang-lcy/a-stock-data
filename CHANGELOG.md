@@ -29,6 +29,14 @@
 - **异常处理（有意保留现状）**：各端点 `except Exception: print("[WARN]...") + 返回空/默认值` 的防御式设计**保留不改**——对 agent 执行的 skill，瞬态网络错误不应 `raise` 崩溃整个分析流程；返回空列表已是明确的「无数据」信号，WARN 也会打到 stdout 供 agent 感知。强行转 raise 会降可靠性。
 - **渐进式披露拆分（评审 P0-4）未做**：82KB SKILL.md → `scripts/` + `references/` 的拆分是多日架构重构，upstream 作者已明确拒绝（#1 / #21 / #22）；作为 fork 后续独立 phase 评估，不在本次提交内。
 
+### 复审修复（子 agent critical review 后补）
+- **[blocker] requirements.txt 补 `lxml>=4.6`**：`pd.read_html`（§2.2 `ths_eps_forecast`）的 HTML 解析后端，pandas 核心包不含，干净安装必需；否则首次调用即 `ImportError`。
+- **requirements.txt 补 `urllib3>=1.26`**：`em_get` 重试用的 `Retry(allowed_methods=...)` 字段 1.26 才引入，锁下界保证重试对所有环境生效（旧版静默降级为不重试，不崩但 P1 修复失效）。
+- **`full_valuation` 残留裸 `float(vals[N])`**：行 price/mcap/pe_ttm/pb 4 处仍是 `float(vals[3])` 等旧模式（与腾讯停牌 `'-'` 同 bug），停牌股调用会崩 → 抽局部 `_num()` 安全转换。
+- **`eastmoney_reports` 加 code guard**：`q_type==0 and not code` 时 `raise ValueError`，防无参调用被东财当成拉全市场（数百页 + 限流极慢）。
+- **`download_pdf` 正则补控制字符**：`[\x00-\x1f\\/:*?"<>|]`，纵深防御 null 字节/换行/RTL override 等（不致穿越，但避免诡异文件名 / `embedded null byte` 写入错误）。
+- **description 精简**至 356 字符（原 408），去掉与 Prerequisites/依赖矩阵重复的前置段冗余。
+
 ---
 
 ## v3.2.2 — 2026-06-03

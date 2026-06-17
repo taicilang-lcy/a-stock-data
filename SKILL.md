@@ -1,6 +1,6 @@
 ---
 name: a-stock-data
-description: A股全栈数据工具包 — 覆盖行情(mootdx+腾讯+百度K线)、研报(东财+同花顺+iwencai)、信号(同花顺热点+北向+龙虎榜+解禁+行业)、资金面(融资融券+大宗交易+股东户数+分红+资金流分钟级+资金流120日)、新闻(东财个股+全球资讯)、基础数据(mootdx财务/F10+东财+新浪三表)、公告(巨潮)七层数据源，内嵌全部调用代码，自包含零依赖外部文件。优先用通达信(mootdx)/腾讯(不封IP)，东财接口已内置限流防封。适用于个股估值、研报检索、题材归因、龙虎榜跟踪、解禁预警、行业轮动、融资融券跟踪、筹码分析、产业链调研、批量筛选等场景。前置依赖：需 mootdx<0.11（国内通达信TCP 7709，海外不可用）+ requests + pandas，详见 requirements.txt；iwencai 语义搜索需自配 IWENCAI_API_KEY，其余数据源全部免费无 key。
+description: A股全栈数据工具包 — 覆盖行情(mootdx+腾讯+百度K线)、研报(东财+同花顺+iwencai)、信号(同花顺热点+北向+龙虎榜+解禁+行业)、资金面(融资融券+大宗交易+股东户数+分红+资金流分钟级+资金流120日)、新闻(东财个股+全球资讯)、基础数据(mootdx财务/F10+东财+新浪三表)、公告(巨潮)七层数据源，内嵌全部调用代码，自包含零依赖外部文件。优先用通达信(mootdx)/腾讯(不封IP)，东财接口已内置限流防封。适用于个股估值、研报检索、题材归因、龙虎榜跟踪、解禁预警、行业轮动、融资融券跟踪、筹码分析、产业链调研、批量筛选等场景。前置：mootdx<0.11（国内TCP，海外不可用）；iwencai语义搜索需key，其余免费无key——详见 requirements.txt。
 origin: custom
 version: 3.2.2-lcy.1
 ---
@@ -482,6 +482,9 @@ def eastmoney_reports(code: str = "", max_pages: int = 5, q_type: int = 0,
                      （industry="*"=全行业；或传东财行业名如 "通用设备"），
                      从源头不碰个股。begin/end 控制日期范围（YYYY-MM-DD）。
     返回 record 列表，字段含 publishDate/orgSName/title/infoCode/emRatingName 等。"""
+    # q_type=0 必须传 code；否则东财会返回全市场研报（数百页，配合限流极慢且无意义）。
+    if q_type == 0 and not code:
+        raise ValueError("q_type=0（个股研报）必须传 code；按行业拉请用 q_type=1。")
     all_records = []
     for page in range(1, max_pages + 1):
         params = {
@@ -509,11 +512,12 @@ def download_pdf(record: dict, target_dir: str = "./reports") -> str | None:
     if not info_code:
         return None
     # 安全校验：org/date 来自外部数据，未清洗会拼进文件名导致路径穿越（#3）。
-    # 统一过滤非法路径字符 + 截断；date 额外校验 YYYY-MM-DD 格式。
+    # 过滤非法路径字符 + 控制字符/null字节（\x00-\x1f）+ 截断；date 额外校验 YYYY-MM-DD。
+    _ILLEGAL = r'[\x00-\x1f\\/:*?"<>|]'
     date_raw = (record.get("publishDate") or "")[:10]
     date = date_raw if re.match(r'^\d{4}-\d{2}-\d{2}$', date_raw) else "unknown_date"
-    org = re.sub(r'[\\/:*?"<>|]', "_", (record.get("orgSName") or "未知"))[:40]
-    title = re.sub(r'[\\/:*?"<>|]', "_", record.get("title", ""))[:80]
+    org = re.sub(_ILLEGAL, "_", (record.get("orgSName") or "未知"))[:40]
+    title = re.sub(_ILLEGAL, "_", record.get("title", ""))[:80]
     fname = f"{date}_{org}_{title}.pdf"
     target = Path(target_dir) / fname
     if target.exists():
@@ -1908,6 +1912,13 @@ import pandas as pd
 
 def full_valuation(code: str) -> dict:
     """单票完整估值分析"""
+    def _num(v, default=0.0):
+        """安全转浮点：停牌占位 '-' 等异常返回 default，避免 float('-') 崩溃"""
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
     # 1. 腾讯实时行情
     prefix = "sh" if code.startswith(("6","9")) else ("bj" if code.startswith("8") else "sz")
     url = f"https://qt.gtimg.cn/q={prefix}{code}"
@@ -1916,10 +1927,10 @@ def full_valuation(code: str) -> dict:
     resp = urllib.request.urlopen(req, timeout=10)
     data = resp.read().decode("gbk")
     vals = data.split('"')[1].split("~")
-    price = float(vals[3])
-    mcap = float(vals[44])
-    pe_ttm = float(vals[39]) if vals[39] else 0
-    pb = float(vals[46]) if vals[46] else 0
+    price = _num(vals[3])
+    mcap = _num(vals[44])
+    pe_ttm = _num(vals[39])
+    pb = _num(vals[46])
 
     # 2. 机构一致预期（直连同花顺）
     df = ths_eps_forecast(code)
