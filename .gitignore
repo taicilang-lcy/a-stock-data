@@ -1,0 +1,17 @@
+# 凭证 / 环境变量（iwencai key 等，绝不提交）
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+
+# 研报 PDF 下载产物（download_pdf 默认输出到 ./reports）
+/reports/
+
+# 系统
+.DS_Store

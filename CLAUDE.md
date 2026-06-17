@@ -22,7 +22,11 @@ cd /Users/lcy/ai_workspace/ai_toolset/a-stock-data
 pip install -r requirements.txt   # mootdx<0.11, requests, pandas, lxml, urllib3, stockstats
 ```
 
-- **iwencai 语义搜索**（可选）：需 `IWENCAI_API_KEY`，放项目 `.env`（gitignore）或 `export`。其余数据源全部免费无 key。
+- **iwencai 语义搜索**（可选）：需 `IWENCAI_API_KEY`。代码只读**环境变量**（`os.environ.get`，不读 `.env` 文件），所以二选一：
+  - 推荐：`echo 'export IWENCAI_API_KEY="你的key"' >> ~/.zshrc`（全局，所有项目生效）
+  - 或：写进目标项目的 `.claude/settings.json` 的 `env` 字段（仅该项目 CC 子进程生效）
+  - ⚠️ **别放项目 `.env`**——代码不会加载它（iwencai 永远 401）；且容易被误提交泄露凭证。
+  其余数据源全部免费无 key。
 - **网络**：mootdx 走国内通达信 TCP 7709，**海外 IP 不可用**；其余 HTTP 接口海外可用。
 
 ## 研报拉取（本项目主要用途）—— 两条路
