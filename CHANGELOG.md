@@ -1,5 +1,26 @@
 # Changelog
 
+## v3.2.4-lcy.2 — 2026-06-25（fork: taicilang-lcy/a-stock-data）
+
+> **同步 upstream v3.2.3 + v3.2.4**（base 由 v3.2.2 推进到 v3.2.4），保留全部 lcy.1 的 P0/P1 修复。
+
+### 同步（来自 upstream）
+- **v3.2.3 — §2.1 东财行业研报 `eastmoney_industry_reports()`**：研报层补上行业研报端点（与个股研报同端点 `reportapi/report/list`，仅 `qType=1`）；`industry_code="*"` 拉全行业、传东财行业码（如 `1238`=IT服务Ⅱ）精确过滤，PDF 复用 `download_pdf()`。端点数 27 → 28。
+- **v3.2.4 — mootdx 0.11.x BESTIP 空串崩溃修复**：新增 `tdx_client()` helper（Prerequisites 章节），所有 4 处 mootdx 调用统一改走它；顺序探测 `_TDX_SERVERS`（TCP 握手）+ 三级 fallback（bestip 测速 → 裸 factory → 明确 RuntimeError），对 0.10 / 0.11 通用。
+
+### 变更（fork 自身）
+- **放宽 mootdx 上界（修正 lcy.1 对 #26 的处理）**：lcy.1 曾靠 `requirements.txt` 锁 `mootdx<0.11` 规避 0.11.x bug；现 upstream v3.2.4 的 `tdx_client()` 从代码层根治该 bug（对 0.10 / 0.11 均适用，且作者实测锁 `0.10.12` 在干净 Python 3.9 下 `import mootdx` 反崩），故**移除 `<0.11` 上界**：`requirements.txt` 改 `mootdx>=0.10.5`；SKILL.md 依赖表 / pip 示例 / frontmatter description 同步去掉上界标注。
+- 版本号 `3.2.2-lcy.1` → `3.2.4-lcy.2`（base 推进 + fork 第二轮修订）。
+
+### 测试
+- SKILL.md 全部 python 代码块通过 `ast` 语法校验（cherry-pick 冲突解决后无回归）。
+- `tdx_client()` / `eastmoney_industry_reports()` 为 upstream 实测过的代码，原样合入；本次未改其实现逻辑。
+
+### 说明
+- 合入方式：`git cherry-pick 3c5d8a8 e40d065`（按 fork 约定，不直接 merge master）；冲突仅在 SKILL.md 依赖表 + CHANGELOG 顶部，已逐处保留 fork 定制 + 采用 upstream 修法。
+
+---
+
 ## v3.2.2-lcy.1 — 2026-06-17（fork: taicilang-lcy/a-stock-data）
 
 > 基于 upstream v3.2.2，工程化 / 安全 / 健壮性修复。fork 独立版本线（`-lcy.N` 后缀），与 upstream 解耦，便于后续按需 cherry-pick upstream 的接口失效修复。
@@ -38,6 +59,20 @@
 - **description 精简**至 356 字符（原 408），去掉与 Prerequisites/依赖矩阵重复的前置段冗余。
 
 ---
+
+## v3.2.4 — 2026-06-20
+
+### 修复（mootdx 0.11.x 兼容 · #26 / PR #7）
+- **mootdx 0.11.x 全新安装 BESTIP 空串崩溃**：干净环境下 `Quotes.factory(market='std')` 裸调用会抛 `ValueError: not enough values to unpack (expected 2, got 0)`。根因：`~/.mootdx/config.json` 的 `BESTIP.HQ` 初始为空字符串 `""`（非缺失键），mootdx 内部 `dict.get(key, default)` 取不到 default，拆包失败。**老用户（config 曾填充过 IP）不触发，故此前多次实测漏掉。**
+- **解法：新增 `tdx_client()` helper（Prerequisites 章节），所有 4 处 mootdx 调用统一改走它。** 顺序探测内置可用服务器列表 `_TDX_SERVERS`（TCP 握手），用第一个可达的显式 `server=(ip,port)` 绕过 BESTIP；三级 fallback（bestip 测速 → 裸 factory → 明确 RuntimeError）保证 IP 列表老化/换网/老用户场景都能工作。
+- **明确不锁版本**：锁 `mootdx==0.10.12` 在部分环境（干净 Python 3.9）下 `import mootdx` 因 numpy/pandas 二进制不兼容直接崩，比 0.11.x 更糟。helper 对 0.10 / 0.11 通用，故依赖仍保持 `mootdx>=0.10`。
+
+### 测试
+- helper 探测逻辑实测（2026-06-20，本机网络）：`_TDX_SERVERS` 10/10 TCP 可达；语法 `py_compile` 通过。
+- 早前隔离实测（临时 venv，mootdx 0.11.7）：强制 `BESTIP.HQ=""` 稳定复现 ValueError；改用 `server=(ip,port)` 显式传参后 `bars()` 正常取回 5 根。
+
+### 说明
+- 端点数（28）、数据源数不变；纯兼容性补丁。致谢 PR #7（@ericheroster）提供 helper 思路，本版在其基础上加了三级 fallback 防 IP 老化。
 
 ## v3.2.3 — 2026-06-20
 

@@ -4,6 +4,8 @@ A 股全栈数据工具包 — 7 层架构 · 28 个端点 · 13 个数据源 ·
 
 一个自包含的 Skill 文件，把分散在 13 个数据源里的 A 股原始数据整合成 AI 编程助手直接能用的工具集。你不用再背 mootdx 的 K 线参数、东财的 PDF Referer 头、iwencai 的 X-Claw 鉴权——全部封装好了。
 
+> **V3.2.4 修复（2026-06-20 · #26）：** **mootdx 0.11.x 全新安装 BESTIP 空串崩溃**——干净环境裸调 `Quotes.factory()` 抛 `ValueError: not enough values to unpack`（老用户 config 已填 IP 不触发，故易漏测）。新增 `tdx_client()` helper（TCP 探测可用服务器 + 三级 fallback）统一替换 4 处 mootdx 调用，对 0.10/0.11 通用、不锁版本（锁 0.10.12 反而在部分 Python 下 import 崩）。
+>
 > **V3.2.3 新增（2026-06-20）：** **行业研报**——研报层补上东财行业研报端点 `eastmoney_industry_reports()`，与个股研报同端点（仅 `qType=1`），支持全行业拉取或按东财行业码精确过滤，PDF 复用现有 `download_pdf()`。端点数 27 → 28。
 >
 > **V3.2.2 修复（2026-06-03）：** ① **概念板块归属（#18）**——百度 PAE `getrelatedblock` 失效（`ResultCode 10003`）→ 改用东财 `slist` 一次拿全个股所属板块（行业/概念/地域 + BK码 + 涨跌幅 + 龙头股）；② **巨潮公告 orgId（#19）**——硬编码 `gssx0{code}` 导致大量 601xxx 股票查不到公告 → 改为动态查官方映射表 `szse_stock.json`（6198 只股）；③ 修复综合示例对已删函数 `baidu_fund_flow_history` 的调用；④ §4.5/§5.1 加大陆住宅 IP 间歇风控说明。
@@ -23,7 +25,7 @@ A 股全栈数据工具包 — 7 层架构 · 28 个端点 · 13 个数据源 ·
 ## 架构
 
 ```
-A 股全栈数据 · 七层架构 · V3.2.3
+A 股全栈数据 · 七层架构 · V3.2.4
 │  （优先级：mootdx/腾讯 不封IP 优先用；东财仅用于独有数据，已内置限流防封）
 ├── 行情层    mootdx + 腾讯财经 + 百度K线   K线(带MA5/10/20) + 五档盘口 + PE/PB/市值 + 指数/ETF
 ├── 研报层    东财 reportapi + 同花顺 + iwencai  个股研报 / 行业研报 / PDF下载 / 一致预期 / NL搜索
@@ -161,6 +163,13 @@ pip install mootdx requests pandas stockstats
 
 ---
 
+## V3.2.4 亮点
+
+| 变化 | 说明 |
+|------|------|
+| **mootdx 0.11.x 兼容（#26 / PR #7）** | 全新安装裸调 `Quotes.factory()` 因 `BESTIP.HQ` 空串抛 `ValueError` → 新增 `tdx_client()` helper：TCP 探测内置可用服务器列表，用显式 `server=(ip,port)` 绕过 BESTIP，三级 fallback（bestip 测速→裸 factory→明确报错）防 IP 老化/换网。4 处 mootdx 调用统一改走它 |
+| **不锁 mootdx 版本（决策）** | 锁 `0.10.12` 在干净 Python 3.9 下 `import` 即崩（numpy/pandas 二进制不兼容），比 0.11.x 更糟 → 依赖保持 `>=0.10`，靠 helper 而非锁版本解决兼容 |
+
 ## V3.2.3 亮点
 
 | 变化 | 说明 |
@@ -279,6 +288,8 @@ Full-stack data toolkit for China A-Share market — 7-layer architecture · 28 
 
 A self-contained Skill file that consolidates raw A-share data from 13 sources into a ready-to-use toolkit for AI coding assistants. No need to memorize mootdx candlestick parameters, Eastmoney PDF Referer headers, or iwencai X-Claw authentication — it's all handled.
 
+> **V3.2.4 Fix (2026-06-20 · #26):** **mootdx 0.11.x fresh-install BESTIP crash** — on a clean machine a bare `Quotes.factory()` throws `ValueError: not enough values to unpack` (existing users whose config already holds IPs never hit it, so it was easy to miss). Added a `tdx_client()` helper (TCP-probes a built-in server list + 3-level fallback) and routed all 4 mootdx calls through it; works on 0.10/0.11 with no version pin (pinning 0.10.12 actually crashes on import under some Pythons).
+>
 > **V3.2.3 New (2026-06-20):** **Industry reports** — added the Eastmoney industry-report endpoint `eastmoney_industry_reports()` to the research layer. Same endpoint as single-stock reports (only `qType=1`); pull all industries or filter by an Eastmoney industry code, PDF download reuses the existing `download_pdf()`. Endpoints 27 → 28.
 >
 > **V3.2.2 Fix (2026-06-03):** ① **Sector/concept membership (#18)** — Baidu PAE `getrelatedblock` is dead (`ResultCode 10003`) → switched to Eastmoney `slist`, fetching all of a stock's sectors (industry/concept/region + BK code + change% + leading stock) in one request. ② **cninfo filing orgId (#19)** — hardcoded `gssx0{code}` made many 601xxx tickers return zero filings → now resolves the real orgId dynamically from the official map `szse_stock.json` (6198 stocks). ③ Fixed a crash in the combined example calling the removed `baidu_fund_flow_history`. ④ Added notes on intermittent Eastmoney throttling for some mainland residential IPs.
@@ -298,7 +309,7 @@ A self-contained Skill file that consolidates raw A-share data from 13 sources i
 ## Architecture
 
 ```
-China A-Share Full-Stack Data · 7-Layer Architecture · V3.2.3
+China A-Share Full-Stack Data · 7-Layer Architecture · V3.2.4
 │  (Priority: prefer mootdx/Tencent — never IP-banned; Eastmoney only for exclusive data, with built-in throttling)
 ├── Market Data    mootdx + Tencent + Baidu K-line   Candlesticks (w/ MA5/10/20) + Order Book + PE/PB + Index/ETF
 ├── Research       Eastmoney + THS + iwencai          Stock reports / Industry reports / PDF / Consensus EPS / NL search
@@ -435,6 +446,13 @@ Just tell your AI assistant:
 | New Target Research | Coverage → Valuation → Concepts → Fund flow → Dragon tiger → Lockup → Margin | 1 min |
 
 ---
+
+## V3.2.4 Highlights
+
+| Change | Description |
+|--------|-------------|
+| **mootdx 0.11.x compat (#26 / PR #7)** | A bare `Quotes.factory()` crashes on a fresh install (`BESTIP.HQ` empty string → `ValueError`) → added a `tdx_client()` helper that TCP-probes a built-in server list and passes an explicit `server=(ip,port)` to bypass BESTIP, with a 3-level fallback (bestip probe → bare factory → explicit error) against IP aging. All 4 mootdx calls now route through it |
+| **No mootdx version pin (decision)** | Pinning `0.10.12` crashes on `import` under a clean Python 3.9 (numpy/pandas ABI mismatch) — worse than 0.11.x → dependency stays `>=0.10`, compat handled by the helper, not a pin |
 
 ## V3.2.3 Highlights
 

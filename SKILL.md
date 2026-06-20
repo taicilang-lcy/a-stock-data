@@ -166,7 +166,7 @@ pip install "mootdx>=0.10.5,<0.11" requests pandas stockstats
 
 | 依赖 | 版本要求 | 用途 |
 |------|---------|------|
-| mootdx | `>=0.10.5,<0.11` ⚠️ | TCP行情+财务+F10（唯一非HTTP依赖）；**必须锁上界**——0.11.x 重构 reader 子模块已不兼容（#26） |
+| mootdx | `>=0.10.5` | TCP行情+财务+F10（唯一非HTTP依赖）；0.11.x 的 BESTIP 空串 bug 已由下节 `tdx_client()` 规避，故**不锁上界**（锁 `0.10.12` 在干净 Python 3.9 下 import 反崩，见下节） |
 | requests | `>=2.25` | 所有HTTP API直连 |
 | pandas | `>=1.3` | 数据处理+HTML表格解析（pandas 3.0 需 `StringIO` 包裹 `read_html`，§2.2 已处理） |
 | stockstats | `>=0.4` | 技术指标计算（RSI/MACD/BOLL等） |
@@ -187,6 +187,63 @@ export IWENCAI_BASE_URL="https://openapi.iwencai.com"
 ```
 
 其他数据源（mootdx / 腾讯 / 东财 / 同花顺 / 百度股市通 / 新浪 / 巨潮）全部免费，无需 key。
+
+### mootdx 客户端（必读，规避 0.11.x BESTIP 空串 bug）
+
+> **已知 bug（mootdx 0.11.x）：** 全新安装后 `Quotes.factory(market='std')` 裸调用可能抛 `ValueError: not enough values to unpack (expected 2, got 0)`。
+> 根因：`~/.mootdx/config.json` 的 `BESTIP.HQ` 初始是空字符串 `""`（不是缺失键），mootdx 用 `dict.get(key, default)` 取不到 default，拆包失败。**老用户（config 曾填充过 IP）不会触发，所以容易漏测。**
+> **不要靠锁版本解决：** 锁 `mootdx==0.10.12` 在部分环境（如干净的 Python 3.9）下 `import mootdx` 会因 numpy/pandas 二进制不兼容直接崩。正确做法是用下面的 `tdx_client()`——显式传 server 绕过 BESTIP，对 0.10 / 0.11 都适用。
+
+**统一用以下 helper 创建客户端（所有 mootdx 调用都走它）：**
+
+```python
+import socket
+from mootdx.quotes import Quotes
+
+# 实测可用的备选服务器（按延迟排序，2026-06 验证）
+_TDX_SERVERS = [
+    ('119.97.185.59', 7709), ('124.70.133.119', 7709), ('116.205.183.150', 7709),
+    ('123.60.73.44', 7709),  ('116.205.163.254', 7709), ('121.36.225.169', 7709),
+    ('123.60.70.228', 7709), ('124.71.9.153', 7709),    ('110.41.147.114', 7709),
+    ('124.71.187.122', 7709),
+]
+
+def _probe(ip, port, timeout=2.0):
+    """TCP 握手探测，判断服务器是否可达"""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+def tdx_client(market='std'):
+    """
+    创建 mootdx 客户端，规避 0.11.x BESTIP.HQ 空串 bug。
+    顺序兜底，保证 IP 列表老化/换网时仍能工作：
+      1) 顺序探测 _TDX_SERVERS，用第一个 TCP 可达的显式 server；
+      2) 全部不可达 → 回退 mootdx 自带 bestip 测速选优；
+      3) 再不行 → 回退裸 factory（老用户 config 已有可用 BESTIP 时成立）；
+      4) 仍失败 → 抛 RuntimeError，明确报错而非死等。
+    """
+    for ip, port in _TDX_SERVERS:
+        if _probe(ip, port):
+            return Quotes.factory(market=market, server=(ip, port))
+    try:
+        return Quotes.factory(market=market, bestip=True)   # fallback 1
+    except Exception:
+        pass
+    try:
+        return Quotes.factory(market=market)                # fallback 2
+    except Exception as e:
+        raise RuntimeError(
+            "所有 mootdx 服务器均不可达。海外网络通常全部超时（TCP 7709），"
+            "请走国内代理或更新 _TDX_SERVERS 列表。原始错误：%s" % e
+        )
+
+# 用法：client = tdx_client()   # 替代所有 Quotes.factory(market='std')
+```
+
+> **海外 IP 用户：** mootdx 走通达信 TCP 7709，海外环境通常全部超时。`tdx_client()` 会快速失败给出明确报错，而非死等。
 
 ### 市场前缀规则（全局通用）
 
@@ -291,7 +348,7 @@ TCP 二进制协议，连通达信服务器(7709)，无需注册，不封IP。
 ```python
 from mootdx.quotes import Quotes
 
-client = Quotes.factory(market='std')
+client = tdx_client()  # 见 Prerequisites 的 tdx_client() helper（规避 0.11.x BESTIP bug；等价 Quotes.factory(market='std')）
 
 # === K线数据 ===
 # market: 0=深圳, 1=上海
@@ -1668,7 +1725,7 @@ for n in news[:10]:
 ```python
 from mootdx.quotes import Quotes
 
-client = Quotes.factory(market='std')
+client = tdx_client()  # 见 Prerequisites 的 tdx_client() helper（规避 0.11.x BESTIP bug；等价 Quotes.factory(market='std')）
 
 # market: 0=深圳, 1=上海
 fin = client.finance(symbol='688017')
@@ -1686,7 +1743,7 @@ fin = client.finance(symbol='688017')
 ```python
 from mootdx.quotes import Quotes
 
-client = Quotes.factory(market='std')
+client = tdx_client()  # 见 Prerequisites 的 tdx_client() helper（规避 0.11.x BESTIP bug；等价 Quotes.factory(market='std')）
 
 # 9 大类文本数据:
 categories = [
@@ -1891,7 +1948,7 @@ for a in anns[:10]:
 
 ```python
 from mootdx.quotes import Quotes
-client = Quotes.factory(market='std')
+client = tdx_client()  # 见 Prerequisites 的 tdx_client() helper（规避 0.11.x BESTIP bug；等价 Quotes.factory(market='std')）
 text = client.F10(symbol='688017', name='最新提示')
 # 包含最近的公告/分红/股东大会决议等摘要
 ```
