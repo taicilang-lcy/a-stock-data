@@ -1,25 +1,27 @@
 # CLAUDE.md — a-stock-data（lcy fork）
 
-> Claude Code 打开本目录时**自动加载**本文件。这是 [simonlin1212/a-stock-data](https://github.com/simonlin1212/a-stock-data) 的 fork（[taicilang-lcy/a-stock-data](https://github.com/taicilang-lcy/a-stock-data)），版本 `3.2.2-lcy.1`。
+> Claude Code 打开本目录时**自动加载**本文件。这是 [simonlin1212/a-stock-data](https://github.com/simonlin1212/a-stock-data) 的 fork（[taicilang-lcy/a-stock-data](https://github.com/taicilang-lcy/a-stock-data)），版本 `3.2.4-lcy.2`。
 
 ## 这是什么
 
-A股全栈数据 **Claude Code Skill**（单文件 `SKILL.md`）。7 层数据源 / 27 端点：行情、研报、信号、资金面、新闻、基础数据、公告。完整用法见 `SKILL.md`，完整变更见 `CHANGELOG.md`。
+A股全栈数据 **Claude Code Skill**（单文件 `SKILL.md`）。7 层数据源 / 28 端点：行情、研报、信号、资金面、新闻、基础数据、公告。完整用法见 `SKILL.md`，完整变更见 `CHANGELOG.md`。
 
-## lcy fork 相对 upstream 改了什么（v3.2.2-lcy.1）
+## lcy fork 相对 upstream 改了什么（v3.2.4-lcy.2）
 
-- **P0**：`download_pdf` 路径穿越修复（#3）；新增 `requirements.txt` 锁 `mootdx<0.11`（#26）。
+> **v3.2.4-lcy.2（2026-06-25 同步）**：cherry-pick upstream v3.2.3（§2.1 东财行业研报 `eastmoney_industry_reports()`，端点 27→28）+ v3.2.4（`tdx_client()` 规避 mootdx 0.11.x BESTIP bug）；因 `tdx_client()` 已从代码层根治 #26，**放宽 mootdx 上界**（`<0.11` → `>=0.10.5`）。
+
+- **P0**：`download_pdf` 路径穿越修复（#3）；新增 `requirements.txt` 锁依赖下界（`mootdx>=0.10.5` / `lxml` / `urllib3` 等）。mootdx 0.11.x 兼容性（#26）现由 upstream v3.2.4 的 `tdx_client()` 解决，故**不锁上界**。
 - **P1**：`em_get` 连接级自动重试（urllib3 Retry）；腾讯字段停牌容错（`_to_float`）；`full_valuation` EPS 按列名解析（不再靠固定 iloc）；`eastmoney_reports` 暴露 `q_type=1`（行业研报）。
 - **复审补**：requirements 补 `lxml`/`urllib3`；`full_valuation` 残留裸 float 修复；`eastmoney_reports` code guard；`download_pdf` 正则补控制字符。
 - **有意未改**：iwencai 函数（核对源码 `_claw_headers()` 头齐全、无 bug）；异常处理（防御式 `print+默认值` 是 agent skill 的合理设计，保留）；渐进式披露拆分（P0-4，82KB 单文件→scripts/+references/，多日重构，留后续 phase）。
 
-> 逐条证据见 `CHANGELOG.md` 的 `v3.2.2-lcy.1`。
+> 逐条证据见 `CHANGELOG.md`（`v3.2.4-lcy.2` 同步记录 + `v3.2.2-lcy.1` P0/P1 证据）。
 
 ## 配置（首次使用）
 
 ```bash
 cd /Users/lcy/ai_workspace/ai_toolset/a-stock-data
-pip install -r requirements.txt   # mootdx<0.11, requests, pandas, lxml, urllib3, stockstats
+pip install -r requirements.txt   # mootdx>=0.10.5, requests, pandas, lxml, urllib3, stockstats
 ```
 
 - **iwencai 语义搜索**（可选）：需 `IWENCAI_API_KEY`。代码只读**环境变量**（`os.environ.get`，不读 `.env` 文件），所以二选一：

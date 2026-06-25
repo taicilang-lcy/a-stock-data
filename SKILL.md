@@ -1,6 +1,6 @@
 ---
 name: a-stock-data
-description: A股全栈数据工具包 — 覆盖行情(mootdx+腾讯+百度K线)、研报(东财+同花顺+iwencai)、信号(同花顺热点+北向+龙虎榜+解禁+行业)、资金面(融资融券+大宗交易+股东户数+分红+资金流分钟级+资金流120日)、新闻(东财个股+全球资讯)、基础数据(mootdx财务/F10+东财+新浪三表)、公告(巨潮)七层数据源，内嵌全部调用代码，自包含零依赖外部文件。优先用通达信(mootdx)/腾讯(不封IP)，东财接口已内置限流防封。适用于个股估值、研报检索、题材归因、龙虎榜跟踪、解禁预警、行业轮动、融资融券跟踪、筹码分析、产业链调研、批量筛选等场景。前置：mootdx<0.11（国内TCP，海外不可用）；iwencai语义搜索需key，其余免费无key——详见 requirements.txt。
+description: A股全栈数据工具包 — 覆盖行情(mootdx+腾讯+百度K线)、研报(东财+同花顺+iwencai)、信号(同花顺热点+北向+龙虎榜+解禁+行业)、资金面(融资融券+大宗交易+股东户数+分红+资金流分钟级+资金流120日)、新闻(东财个股+全球资讯)、基础数据(mootdx财务/F10+东财+新浪三表)、公告(巨潮)七层数据源，内嵌全部调用代码，自包含零依赖外部文件。优先用通达信(mootdx)/腾讯(不封IP)，东财接口已内置限流防封。适用于个股估值、研报检索、题材归因、龙虎榜跟踪、解禁预警、行业轮动、融资融券跟踪、筹码分析、产业链调研、批量筛选等场景。前置：mootdx（国内TCP，海外不可用）；iwencai语义搜索需key，其余免费无key——详见 requirements.txt。
 origin: custom
 version: 3.2.4-lcy.2
 ---
@@ -160,8 +160,8 @@ version: 3.2.4-lcy.2
 ```bash
 # 推荐：用仓库根目录的 requirements.txt（已锁版本，避免踩 #26 mootdx 0.11.x 坑）
 pip install -r requirements.txt
-# 或最小化安装（注意 mootdx 必须 <0.11）
-pip install "mootdx>=0.10.5,<0.11" requests pandas stockstats
+# 或最小化安装（mootdx 下界 0.10.5；0.11.x 由 tdx_client() 规避，无需锁上界）
+pip install "mootdx>=0.10.5" requests pandas stockstats
 ```
 
 | 依赖 | 版本要求 | 用途 |
